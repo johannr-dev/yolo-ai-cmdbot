@@ -9,6 +9,8 @@ from ollama import Client
 from openai import AzureOpenAI 
 from anthropic import Anthropic
 import os
+import boto3
+import json
 
 class AIModel(ABC):
     @abstractmethod
@@ -62,7 +64,25 @@ class AIModel(ABC):
             api_key = os.getenv("ANTHROPIC_API_KEY")
             if not api_key: 
                 api_key=config["anthropic_api_key"]
-            return AnthropicModel(api_key=api_key) 
+            return AnthropicModel(api_key=api_key)
+        
+        elif api_provider == "bedrock":
+            aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+            aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+            if not aws_access_key:
+                aws_access_key = config.get("aws_access_key_id", "")
+            if not aws_secret_key:
+                aws_secret_key = config.get("aws_secret_access_key", "")
+            
+            aws_region = config.get("aws_region", "us-east-1")
+            aws_profile = config.get("aws_profile", "default")
+            
+            return BedrockModel(
+                aws_access_key=aws_access_key,
+                aws_secret_key=aws_secret_key,
+                region=aws_region,
+                profile_name=aws_profile
+            )
         else:
             raise ValueError(f"Invalid AI model provider: {api_provider}")
 
@@ -144,6 +164,118 @@ class AnthropicModel(AIModel):
                                     max_tokens=max_tokens)
         
         return resp.content[0].text
+    
+    def moderate(self, message):
+        pass
+
+class BedrockModel(AIModel):
+    def __init__(self, aws_access_key, aws_secret_key, region, profile_name):
+        session = boto3.Session(
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            region_name=region,
+            profile_name=profile_name if not (aws_access_key and aws_secret_key) else None
+        )
+        self.client = session.client('bedrock-runtime')
+    
+    def chat(self, messages, model, temperature, max_tokens):
+        if model.startswith("anthropic."):
+            return self._anthropic_chat(messages, model, temperature, max_tokens)
+        elif model.startswith("amazon."):
+            return self._amazon_chat(messages, model, temperature, max_tokens)
+        elif model.startswith("meta."):
+            return self._meta_chat(messages, model, temperature, max_tokens)
+        else:
+            return self._anthropic_chat(messages, model, temperature, max_tokens)
+    
+    def _anthropic_chat(self, messages, model, temperature, max_tokens):
+        system_prompt = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
+        
+        formatted_messages = []
+        for m in messages:
+            if m.get("role") != "system":  # Skip system messages as they're handled separately
+                formatted_messages.append({
+                    "role": "user" if m.get("role") == "user" else "assistant",
+                    "content": m.get("content", "")
+                })
+        
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": formatted_messages
+        }
+        
+        if system_prompt:
+            request_body["system"] = system_prompt
+            
+        response = self.client.invoke_model(
+            modelId=model,
+            body=json.dumps(request_body)
+        )
+        
+        response_body = json.loads(response.get('body').read())
+        return response_body.get('content')[0].get('text')
+    
+    def _amazon_chat(self, messages, model, temperature, max_tokens):
+        prompt = ""
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role == "system":
+                prompt += f"<system>{content}</system>\n"
+            elif role == "user":
+                prompt += f"<user>{content}</user>\n"
+            elif role == "assistant":
+                prompt += f"<assistant>{content}</assistant>\n"
+        
+        prompt += "<assistant>"
+        
+        request_body = {
+            "inputText": prompt,
+            "textGenerationConfig": {
+                "maxTokenCount": max_tokens,
+                "temperature": temperature,
+                "topP": 0.9
+            }
+        }
+        
+        response = self.client.invoke_model(
+            modelId=model,
+            body=json.dumps(request_body)
+        )
+        
+        response_body = json.loads(response.get('body').read())
+        return response_body.get('results')[0].get('outputText')
+    
+    def _meta_chat(self, messages, model, temperature, max_tokens):
+        prompt = ""
+        for m in messages:
+            role = m.get("role")
+            content = m.get("content", "")
+            if role == "system":
+                prompt += f"<system>\n{content}\n</system>\n"
+            elif role == "user":
+                prompt += f"<human>\n{content}\n</human>\n"
+            elif role == "assistant":
+                prompt += f"<assistant>\n{content}\n</assistant>\n"
+        
+        prompt += "<assistant>\n"
+        
+        request_body = {
+            "prompt": prompt,
+            "max_gen_len": max_tokens,
+            "temperature": temperature,
+            "top_p": 0.9
+        }
+        
+        response = self.client.invoke_model(
+            modelId=model,
+            body=json.dumps(request_body)
+        )
+        
+        response_body = json.loads(response.get('body').read())
+        return response_body.get('generation')
     
     def moderate(self, message):
         pass
