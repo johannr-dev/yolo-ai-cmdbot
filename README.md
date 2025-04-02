@@ -2,6 +2,13 @@
 
 ![Animated GIF](https://github.com/wunderwuzzi23/blog/raw/master/static/images/2023/yolo-shell-anim-gif.gif)
 
+# Update Yolo v0.6 - Security Enhancements
+
+* Added security checks to prevent execution of potentially dangerous commands
+* Implemented protection against data exfiltration attempts
+* Added blocklist for commands that might access sensitive files or API keys
+* Enhanced security for commands that use encoding or send data to external servers
+
 # Update Yolo v0.5 - Support for Claude and other providers
 
 * Added Claude support. Can an API key from Anthropic, current model `claude-3-5-sonnet-20240620`. 

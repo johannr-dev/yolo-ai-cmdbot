@@ -6,6 +6,7 @@
 
 import os
 import platform
+import re
 from ai_model import AIModel, GroqModel, OpenAIModel, OllamaModel, AnthropicModel, AzureOpenAIModel
 import sys
 import subprocess
@@ -101,6 +102,35 @@ def check_for_markdown(response):
     print(colored("The proposed command contains markdown, so I did not execute the response directly: \n", 'red')+response)
     sys.exit(-1)
 
+def check_for_dangerous_command(command):
+  dangerous_patterns = [
+    r'grep.*sk-',
+    r'find.*sk-',
+    r'cat.*\.env',
+    r'cat.*\.apikey',
+    r'cat.*\.yaml',
+    r'cat.*password',
+    r'cat.*secret',
+    r'base64',
+    r'curl.*\$\(',
+    r'wget.*\$\(',
+    r'nc.*\$\(',
+    r'curl.*wuzzi\.net',
+    r'wget.*wuzzi\.net',
+    r'eval.*\$\(',
+    r'xargs.*curl',
+    r'xargs.*wget',
+  ]
+  
+  for pattern in dangerous_patterns:
+    if re.search(pattern, command, re.IGNORECASE):
+      print(colored(f"SECURITY WARNING: Potentially dangerous command detected. This command may attempt to access or exfiltrate sensitive data.", 'red'))
+      print(colored(f"The command contains a pattern that matches: {pattern}", 'red'))
+      print(colored(f"For security reasons, this command will not be executed.", 'red'))
+      return True
+  
+  return False
+
 def missing_posix_display():
   return 'DISPLAY' not in os.environ or not os.environ["DISPLAY"]
 
@@ -131,6 +161,9 @@ def eval_user_intent_and_execute(client, config, user_input, command, shell, ask
     return
   
   if user_input.upper() == "Y" or user_input == "":
+    if check_for_dangerous_command(command):
+      return
+      
     if shell == "powershell.exe":
       subprocess.run([shell, "/c", command], shell=False)  
     else: 
