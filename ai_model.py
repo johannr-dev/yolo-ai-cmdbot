@@ -27,7 +27,17 @@ class AIModel(ABC):
             api_provider = "groq"
         
         if api_provider == "groq":
-            return GroqModel(api_key=os.environ.get("GROQ_API_KEY"))
+            api_key = os.getenv("GROQ_API_KEY")
+            if not api_key:  
+                api_key=config["groq_api_key"]
+            if not api_key:  #If statement to avoid "invalid filepath" error
+                home_path = os.path.expanduser("~")   
+                try:
+                    api_key=open(os.path.join(home_path,".groq.apikey"), "r").readline().strip()
+                except FileNotFoundError:
+                    pass
+            
+            return GroqModel(api_key=api_key)
         
         elif api_provider == "openai":
             api_key = os.getenv("OPENAI_API_KEY")
