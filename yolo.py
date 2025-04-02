@@ -6,6 +6,7 @@
 
 import os
 import platform
+import re
 from ai_model import AIModel, GroqModel, OpenAIModel, OllamaModel, AnthropicModel, AzureOpenAIModel
 import sys
 import subprocess
@@ -59,6 +60,7 @@ def print_usage(config):
   print("* Max. Tokens  : " + str(config["max_tokens"]))
   print("* Safety       : " + str(bool(config["safety"])))
   print("* Command Color: " + str(config["suggested_command_color"]))
+  print("* Redact Info  : " + str(bool(config.get("redact_sensitive_info", True))))
 
 def get_os_friendly_name():
   os_name = platform.system()
@@ -104,6 +106,30 @@ def check_for_markdown(response):
 def missing_posix_display():
   return 'DISPLAY' not in os.environ or not os.environ["DISPLAY"]
 
+def redact_sensitive_information(text):
+  """
+  Detects and redacts sensitive information like API keys in text.
+  
+  Args:
+      text (str): The text to check for sensitive information
+      
+  Returns:
+      str: Text with sensitive information redacted
+  """
+  patterns = [
+    r'sk-[a-zA-Z0-9]{48}',
+    r'(api[_-]?key|apikey|key)[=:"\'\s]+([a-zA-Z0-9_\-\.]{20,})',
+    r'([A-Z_]+API[_]?KEY)=([a-zA-Z0-9_\-\.]{20,})',
+    r'DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[^;]+;',
+    r'AKIA[0-9A-Z]{16}'
+  ]
+  
+  redacted_text = text
+  for pattern in patterns:
+    redacted_text = re.sub(pattern, '[REDACTED]', redacted_text, flags=re.IGNORECASE)
+    
+  return redacted_text
+
 def prompt_user_for_action(config, ask_flag, response):
   print("Command: " + colored(response, config["suggested_command_color"], attrs=['bold']))
   
@@ -130,12 +156,34 @@ def eval_user_intent_and_execute(client, config, user_input, command, shell, ask
     print("No action taken.")
     return
   
+  redact_enabled = config.get("redact_sensitive_info", True)  # Default to True for security
+  
   if user_input.upper() == "Y" or user_input == "":
     if shell == "powershell.exe":
-      subprocess.run([shell, "/c", command], shell=False)  
+      process = subprocess.run([shell, "/c", command], shell=False, capture_output=True, text=True)
+      output = process.stdout
+      if redact_enabled and output:
+        output = redact_sensitive_information(output)
+      print(output)
+      
+      if process.stderr:
+        error = process.stderr
+        if redact_enabled:
+          error = redact_sensitive_information(error)
+        print(error, file=sys.stderr)
     else: 
       # Unix: /bin/bash /bin/zsh: uses -c both Ubuntu and macOS should work, others might not
-      subprocess.run([shell, "-c", command], shell=False)
+      process = subprocess.run([shell, "-c", command], shell=False, capture_output=True, text=True)
+      output = process.stdout
+      if redact_enabled and output:
+        output = redact_sensitive_information(output)
+      print(output)
+      
+      if process.stderr:
+        error = process.stderr
+        if redact_enabled:
+          error = redact_sensitive_information(error)
+        print(error, file=sys.stderr)
   
   if bool(config["modify"]) and user_input.upper() == "M":
     print("Modify prompt: ", end = '')
@@ -151,8 +199,15 @@ def eval_user_intent_and_execute(client, config, user_input, command, shell, ask
       if os.name == "posix" and missing_posix_display():
         if get_os_friendly_name() != "Darwin/macOS":
           return
-      pyperclip.copy(command) 
-      print("Copied command to clipboard.")
+      
+      clipboard_content = command
+      if redact_enabled:
+        clipboard_content = redact_sensitive_information(command)
+        pyperclip.copy(clipboard_content)
+        print("Copied command to clipboard (with sensitive information redacted).")
+      else:
+        pyperclip.copy(clipboard_content)
+        print("Copied command to clipboard.")
 
 def main():
   init()  #Enable color output on Windows using colorama

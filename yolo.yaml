@@ -13,6 +13,7 @@ max_tokens: 500
 safety: True                  # Safety: If set to False, commands from LLM run *without* prompting the user.
 modify: False                 # Enable prompt modify feature
 suggested_command_color: blue # Suggested Command Color
+redact_sensitive_info: True   # Redact sensitive information like API keys in command outputs
 
 # API Keys (optional): Preferred to use environment variables 
 # OPENAI_API_KEY, AZURE_OPENAI_API_KEY, ANTHROPIC_API_KEY or GROQ_API_KEY (.env file is also supported)
